@@ -1,4 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.REACT_APP_SUPABASE_URL,
+  process.env.REACT_APP_SUPABASE_ANON_KEY
+);
 
 const TEAM_MEMBERS = [
   { id: 1, name: "정일환", color: "#E85D4A" },
@@ -22,7 +28,6 @@ const EXT_TYPES = [
   { id: "event",    label: "외부",  color: "#757575", bg: "#F5F5F5" },
 ];
 
-// full label for list view
 const EXT_TYPES_FULL = [
   { id: "meeting",  label: "외부 미팅",  color: "#00897B", bg: "#E0F2F1" },
   { id: "training", label: "교육/워크샵", color: "#1E88E5", bg: "#E3F2FD" },
@@ -31,7 +36,6 @@ const EXT_TYPES_FULL = [
 ];
 
 const ALL_TYPES = [...LEAVE_TYPES, ...EXT_TYPES];
-
 const TOTAL_ANNUAL = 15;
 const DAYS_KR   = ["일","월","화","수","목","금","토"];
 const MONTHS_KR = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
@@ -44,27 +48,6 @@ const getFirstDay     = (y,m) => new Date(y, m, 1).getDay();
 const toDateStr       = (y,m,d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
 const monthKey        = (ds) => ds ? ds.slice(0,7) : "";
 
-const initLeaves = [
-  { id:1, memberId:3, type:"annual",     startDate:"2026-04-07", endDate:"2026-04-07", days:1,   reason:"개인 사정" },
-  { id:2, memberId:2, type:"half",       startDate:"2026-04-10", endDate:"2026-04-10", days:0.5, reason:"병원 방문" },
-  { id:3, memberId:4, type:"substitute", startDate:"2026-04-14", endDate:"2026-04-14", days:1,   reason:"3/29 주말근무" },
-  { id:4, memberId:5, type:"annual",     startDate:"2026-04-21", endDate:"2026-04-21", days:1,   reason:"여행" },
-  { id:5, memberId:1, type:"annual",     startDate:"2026-04-28", endDate:"2026-04-28", days:1,   reason:"가족 행사" },
-];
-
-const initExternal = [
-  { id:101, memberId:2, type:"meeting",  startDate:"2026-04-09", endDate:"2026-04-09", title:"클라이언트 미팅", location:"강남 사무실" },
-  { id:102, memberId:1, type:"biz_trip", startDate:"2026-04-22", endDate:"2026-04-23", title:"부산 출장",       location:"부산" },
-  { id:103, memberId:3, type:"training", startDate:"2026-04-16", endDate:"2026-04-16", title:"UX 워크샵",       location:"온라인" },
-];
-
-const initOT = [
-  { id:1, memberId:4, date:"2026-03-29", reason:"분기 마감", used:true  },
-  { id:2, memberId:2, date:"2026-04-05", reason:"긴급 배포", used:false },
-  { id:3, memberId:1, date:"2026-04-12", reason:"고객 미팅", used:false },
-];
-
-// ─── UI helpers ────────────────────────────────────────────
 const inputStyle = { width:"100%", padding:"10px 12px", border:"1.5px solid #E8E8E8", borderRadius:10, fontSize:13, color:"#333", outline:"none", boxSizing:"border-box", background:"#fff" };
 const labelStyle = { fontSize:12, fontWeight:600, color:"#555", display:"block", marginBottom:5 };
 
@@ -95,70 +78,79 @@ function InfoBanner({ color, bg, border, children }) {
   return <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:12, padding:"10px 14px", marginBottom:14, fontSize:12, color }}>{children}</div>;
 }
 function DeleteBtn({ onClick }) {
-  return <button onClick={onClick} style={{ background:"none", border:"none", color:"#CCC", cursor:"pointer", fontSize:16, padding:"2px 6px", borderRadius:6, lineHeight:1 }} title="삭제">✕</button>;
+  return <button onClick={onClick} style={{ background:"none", border:"none", color:"#CCC", cursor:"pointer", fontSize:16, padding:"2px 6px", borderRadius:6 }}>✕</button>;
 }
-
-// ── Calendar event chip — strictly contained ──────────────
 function EventChip({ ev }) {
-  const m2 = getMember(ev.memberId);
+  const m2 = getMember(ev.member_id);
   const t2 = getTypeInfo(ev.type);
-  // Short 2-char name + short type label (already short in ALL_TYPES)
   return (
-    <div style={{
-      background: t2.color,
-      color: "#fff",
-      borderRadius: 3,
-      fontSize: 9,
-      fontWeight: 700,
-      padding: "1px 3px",
-      lineHeight: "14px",
-      // CRITICAL: never overflow the cell
-      overflow: "hidden",
-      textOverflow: "ellipsis",
-      whiteSpace: "nowrap",
-      maxWidth: "100%",
-      display: "block",
-      boxSizing: "border-box",
-    }}>
-      {m2?.name.slice(0,2)} {ev.kind==="external" ? t2.label : t2.label}
+    <div style={{ background:t2.color, color:"#fff", borderRadius:3, fontSize:9, fontWeight:700, padding:"1px 3px", lineHeight:"14px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"100%", display:"block", boxSizing:"border-box" }}>
+      {m2?.name.slice(0,2)} {t2.label}
     </div>
   );
 }
 
-// ─── main ───────────────────────────────────────────────────
 export default function VacationManager() {
   const [tab,          setTab]          = useState("calendar");
-  const [leaves,       setLeaves]       = useState(initLeaves);
-  const [externals,    setExternals]    = useState(initExternal);
-  const [overtimes,    setOvertimes]    = useState(initOT);
-  const [calYear,      setCalYear]      = useState(2026);
-  const [calMonth,     setCalMonth]     = useState(3);
+  const [leaves,       setLeaves]       = useState([]);
+  const [externals,    setExternals]    = useState([]);
+  const [overtimes,    setOvertimes]    = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [calYear,      setCalYear]      = useState(new Date().getFullYear());
+  const [calMonth,     setCalMonth]     = useState(new Date().getMonth());
   const [filterMember, setFilterMember] = useState("all");
   const [showLeave,    setShowLeave]    = useState(false);
   const [showExt,      setShowExt]      = useState(false);
   const [showOT,       setShowOT]       = useState(false);
   const [toast,        setToast]        = useState(null);
-
   const [form,   setForm]   = useState({ memberId:1, type:"annual",  startDate:"", endDate:"", reason:"" });
   const [extForm,setExtForm]= useState({ memberId:1, type:"meeting", startDate:"", endDate:"", title:"", location:"" });
   const [otForm, setOtForm] = useState({ memberId:1, date:"", reason:"" });
 
   function flash(msg, type="error") { setToast({msg,type}); setTimeout(()=>setToast(null),3000); }
 
+  // ── DB 불러오기 ──
+  async function fetchAll() {
+    setLoading(true);
+    const [l, e, o] = await Promise.all([
+      supabase.from("leaves").select("*").order("start_date"),
+      supabase.from("externals").select("*").order("start_date"),
+      supabase.from("overtimes").select("*").order("date"),
+    ]);
+    if (l.data) setLeaves(l.data);
+    if (e.data) setExternals(e.data);
+    if (o.data) setOvertimes(o.data);
+    setLoading(false);
+  }
+
+  useEffect(() => { fetchAll(); }, []);
+
   const monthlyCount = (mid, mk) =>
-    leaves.filter(l => l.memberId===mid && !["substitute","sick"].includes(l.type) && monthKey(l.startDate)===mk).length;
+    leaves.filter(l => l.member_id===mid && !["substitute","sick"].includes(l.type) && monthKey(l.start_date)===mk).length;
 
   const subLeft = (mid) => {
-    const earned = overtimes.filter(o=>o.memberId===mid).length;
-    const used   = overtimes.filter(o=>o.memberId===mid&&o.used).length;
+    const earned = overtimes.filter(o=>o.member_id===mid).length;
+    const used   = overtimes.filter(o=>o.member_id===mid&&o.used).length;
     return earned - used;
   };
 
-  function deleteLeave(id)    { setLeaves(p=>p.filter(l=>l.id!==id));    flash("삭제되었어요.","info"); }
-  function deleteExternal(id) { setExternals(p=>p.filter(e=>e.id!==id)); flash("삭제되었어요.","info"); }
-  function deleteOT(id)       { setOvertimes(p=>p.filter(o=>o.id!==id)); flash("삭제되었어요.","info"); }
+  async function deleteLeave(id) {
+    await supabase.from("leaves").delete().eq("id", id);
+    setLeaves(p=>p.filter(l=>l.id!==id));
+    flash("삭제되었어요.","info");
+  }
+  async function deleteExternal(id) {
+    await supabase.from("externals").delete().eq("id", id);
+    setExternals(p=>p.filter(e=>e.id!==id));
+    flash("삭제되었어요.","info");
+  }
+  async function deleteOT(id) {
+    await supabase.from("overtimes").delete().eq("id", id);
+    setOvertimes(p=>p.filter(o=>o.id!==id));
+    flash("삭제되었어요.","info");
+  }
 
-  function submitLeave() {
+  async function submitLeave() {
     if (!form.startDate||!form.endDate||!form.reason) { flash("모든 항목을 입력해 주세요."); return; }
     const mid=Number(form.memberId), mk=monthKey(form.startDate);
     if (!["substitute","sick"].includes(form.type) && monthlyCount(mid,mk)>=1) {
@@ -166,25 +158,31 @@ export default function VacationManager() {
     }
     if (form.type==="substitute") {
       if (subLeft(mid)<=0) { flash("사용 가능한 대체 휴일이 없어요."); return; }
-      const unused=overtimes.find(o=>o.memberId===mid&&!o.used);
-      if (unused) setOvertimes(p=>p.map(o=>o.id===unused.id?{...o,used:true}:o));
+      const unused = overtimes.find(o=>o.member_id===mid&&!o.used);
+      if (unused) {
+        await supabase.from("overtimes").update({used:true}).eq("id", unused.id);
+        setOvertimes(p=>p.map(o=>o.id===unused.id?{...o,used:true}:o));
+      }
     }
     const days = form.type==="half" ? 0.5 : Math.round((new Date(form.endDate)-new Date(form.startDate))/86400000)+1;
-    setLeaves(p=>[...p,{ id:Date.now(), memberId:mid, type:form.type, startDate:form.startDate, endDate:form.endDate, days, reason:form.reason }]);
+    const { data } = await supabase.from("leaves").insert([{ member_id:mid, type:form.type, start_date:form.startDate, end_date:form.endDate, days, reason:form.reason }]).select();
+    if (data) setLeaves(p=>[...p,...data]);
     setShowLeave(false); setForm({memberId:1,type:"annual",startDate:"",endDate:"",reason:""});
     flash("등록되었어요.","success");
   }
 
-  function submitExt() {
+  async function submitExt() {
     if (!extForm.startDate||!extForm.endDate||!extForm.title) { flash("날짜와 일정 제목을 입력해 주세요."); return; }
-    setExternals(p=>[...p,{ id:Date.now(), memberId:Number(extForm.memberId), type:extForm.type, startDate:extForm.startDate, endDate:extForm.endDate, title:extForm.title, location:extForm.location }]);
+    const { data } = await supabase.from("externals").insert([{ member_id:Number(extForm.memberId), type:extForm.type, start_date:extForm.startDate, end_date:extForm.endDate, title:extForm.title, location:extForm.location }]).select();
+    if (data) setExternals(p=>[...p,...data]);
     setShowExt(false); setExtForm({memberId:1,type:"meeting",startDate:"",endDate:"",title:"",location:""});
     flash("외부 일정이 등록되었어요.","success");
   }
 
-  function submitOT() {
+  async function submitOT() {
     if (!otForm.date||!otForm.reason) { flash("날짜와 사유를 입력해 주세요."); return; }
-    setOvertimes(p=>[...p,{ id:Date.now(), memberId:Number(otForm.memberId), date:otForm.date, reason:otForm.reason, used:false }]);
+    const { data } = await supabase.from("overtimes").insert([{ member_id:Number(otForm.memberId), date:otForm.date, reason:otForm.reason, used:false }]).select();
+    if (data) setOvertimes(p=>[...p,...data]);
     setShowOT(false); setOtForm({memberId:1,date:"",reason:""});
     flash("휴일 근무가 등록되었어요.","success");
   }
@@ -194,18 +192,18 @@ export default function VacationManager() {
 
   function getEventsForDay(y,m,d) {
     const ds = toDateStr(y,m,d);
-    const lv = leaves.filter(l=>l.startDate<=ds&&l.endDate>=ds).map(l=>({...l,kind:"leave"}));
-    const ex = externals.filter(e=>e.startDate<=ds&&e.endDate>=ds).map(e=>({...e,kind:"external"}));
+    const lv = leaves.filter(l=>l.start_date<=ds&&l.end_date>=ds).map(l=>({...l,kind:"leave"}));
+    const ex = externals.filter(e=>e.start_date<=ds&&e.end_date>=ds).map(e=>({...e,kind:"external"}));
     return [...lv,...ex];
   }
 
   const stats = TEAM_MEMBERS.map(m=>{
-    const used = leaves.filter(l=>l.memberId===m.id&&l.type!=="substitute").reduce((a,l)=>a+l.days,0);
+    const used = leaves.filter(l=>l.member_id===m.id&&l.type!=="substitute").reduce((a,l)=>a+l.days,0);
     return {...m, used, remaining:TOTAL_ANNUAL-used, subLeft:subLeft(m.id)};
   });
 
-  const filteredLeaves    = filterMember==="all" ? leaves    : leaves.filter(l=>l.memberId===Number(filterMember));
-  const filteredExternals = filterMember==="all" ? externals : externals.filter(e=>e.memberId===Number(filterMember));
+  const filteredLeaves    = filterMember==="all" ? leaves    : leaves.filter(l=>l.member_id===Number(filterMember));
+  const filteredExternals = filterMember==="all" ? externals : externals.filter(e=>e.member_id===Number(filterMember));
 
   const prevMonth = () => { if(calMonth===0){setCalMonth(11);setCalYear(y=>y-1);}else setCalMonth(m=>m-1); };
   const nextMonth = () => { if(calMonth===11){setCalMonth(0);setCalYear(y=>y+1);}else setCalMonth(m=>m+1); };
@@ -218,10 +216,18 @@ export default function VacationManager() {
     {id:"stats",    label:"📊 통계"},
   ];
 
+  if (loading) return (
+    <div style={{ minHeight:"100vh", background:"#F4F2EE", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Noto Sans KR',sans-serif" }}>
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:40, marginBottom:16 }}>🌴</div>
+        <div style={{ fontSize:16, color:"#888" }}>불러오는 중...</div>
+      </div>
+    </div>
+  );
+
   return (
     <div style={{ minHeight:"100vh", background:"#F4F2EE", fontFamily:"'Noto Sans KR','Apple SD Gothic Neo',sans-serif" }}>
 
-      {/* Toast */}
       {toast && (
         <div style={{ position:"fixed", top:18, left:"50%", transform:"translateX(-50%)", zIndex:2000,
           background:toast.type==="success"?"#1A1A2E":toast.type==="info"?"#555":"#E85D4A",
@@ -229,7 +235,6 @@ export default function VacationManager() {
           boxShadow:"0 4px 20px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast.msg}</div>
       )}
 
-      {/* Header */}
       <div style={{ background:"#1A1A2E", padding:"0 20px" }}>
         <div style={{ maxWidth:960, margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"space-between", height:56 }}>
           <div>
@@ -260,104 +265,57 @@ export default function VacationManager() {
               <span style={{ fontWeight:800, fontSize:16, color:"#1A1A2E" }}>{calYear}년 {MONTHS_KR[calMonth]}</span>
               <button onClick={nextMonth} style={{ background:"#F4F2EE", border:"none", borderRadius:8, width:32, height:32, cursor:"pointer", fontSize:15 }}>›</button>
             </div>
-
-            {/* Day headers */}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:2 }}>
-              {DAYS_KR.map((d,i)=>(
-                <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:600, padding:"4px 0",
-                  color:i===0?"#E85D4A":i===6?"#4A90E2":"#888" }}>{d}</div>
-              ))}
+              {DAYS_KR.map((d,i)=><div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:600, padding:"4px 0", color:i===0?"#E85D4A":i===6?"#4A90E2":"#888" }}>{d}</div>)}
             </div>
-
-            {/* Day cells — key fix: overflow:hidden on the cell itself */}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
               {Array.from({length:firstDay}).map((_,i)=><div key={`e${i}`}/>)}
               {Array.from({length:daysInMonth}).map((_,i)=>{
-                const day   = i+1;
-                const events= getEventsForDay(calYear,calMonth,day);
-                const isToday=calYear===2026&&calMonth===3&&day===20;
-                const dow   =(firstDay+i)%7;
+                const day=i+1, events=getEventsForDay(calYear,calMonth,day);
+                const today=new Date(); const isToday=calYear===today.getFullYear()&&calMonth===today.getMonth()&&day===today.getDate();
+                const dow=(firstDay+i)%7;
                 return (
-                  <div key={day} style={{
-                    // fixed height so nothing can push it taller
-                    height: 56,
-                    borderRadius: 8,
-                    padding: "3px",
-                    background: isToday ? "#1A1A2E" : "#FAFAFA",
-                    border: isToday ? "none" : "1px solid #EBEBEB",
-                    // THE FIX: clip everything inside
-                    overflow: "hidden",
-                    boxSizing: "border-box",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 1,
-                  }}>
-                    {/* Date number */}
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: isToday ? 800 : 500,
-                      color: isToday ? "#fff" : dow===0 ? "#E85D4A" : dow===6 ? "#4A90E2" : "#444",
-                      lineHeight: "13px",
-                      flexShrink: 0,
-                    }}>{day}</span>
-
-                    {/* Event chips — max 2, rest shown as +N */}
+                  <div key={day} style={{ height:56, borderRadius:8, padding:"3px", background:isToday?"#1A1A2E":"#FAFAFA", border:isToday?"none":"1px solid #EBEBEB", overflow:"hidden", boxSizing:"border-box", display:"flex", flexDirection:"column", gap:1 }}>
+                    <span style={{ fontSize:10, fontWeight:isToday?800:500, color:isToday?"#fff":dow===0?"#E85D4A":dow===6?"#4A90E2":"#444", lineHeight:"13px", flexShrink:0 }}>{day}</span>
                     <div style={{ display:"flex", flexDirection:"column", gap:1, overflow:"hidden", flex:1, minHeight:0 }}>
-                      {events.slice(0,2).map(ev => <EventChip key={ev.id} ev={ev}/>)}
-                      {events.length > 2 && (
-                        <div style={{ fontSize:9, color:"#aaa", lineHeight:"13px", paddingLeft:2 }}>
-                          +{events.length-2}
-                        </div>
-                      )}
+                      {events.slice(0,2).map(ev=><EventChip key={ev.id} ev={ev}/>)}
+                      {events.length>2&&<div style={{ fontSize:9, color:"#aaa", lineHeight:"13px", paddingLeft:2 }}>+{events.length-2}</div>}
                     </div>
                   </div>
                 );
               })}
             </div>
-
-            {/* Legend */}
             <div style={{ marginTop:16, paddingTop:14, borderTop:"1px solid #F0F0F0" }}>
               <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginBottom:8 }}>
                 <span style={{ fontSize:11, color:"#999", fontWeight:600, minWidth:36 }}>휴가</span>
-                {LEAVE_TYPES.map(t=>(
-                  <div key={t.id} style={{ display:"flex", alignItems:"center", gap:4 }}>
-                    <div style={{ width:8, height:8, borderRadius:2, background:t.color, flexShrink:0 }}/>
-                    <span style={{ fontSize:11, color:"#666" }}>{t.label}</span>
-                  </div>
-                ))}
+                {LEAVE_TYPES.map(t=><div key={t.id} style={{ display:"flex", alignItems:"center", gap:4 }}><div style={{ width:8, height:8, borderRadius:2, background:t.color }}/><span style={{ fontSize:11, color:"#666" }}>{t.label}</span></div>)}
               </div>
               <div style={{ display:"flex", gap:14, flexWrap:"wrap" }}>
                 <span style={{ fontSize:11, color:"#999", fontWeight:600, minWidth:36 }}>외부</span>
-                {EXT_TYPES_FULL.map(t=>(
-                  <div key={t.id} style={{ display:"flex", alignItems:"center", gap:4 }}>
-                    <div style={{ width:8, height:8, borderRadius:2, background:t.color, flexShrink:0 }}/>
-                    <span style={{ fontSize:11, color:"#666" }}>{t.label}</span>
-                  </div>
-                ))}
+                {EXT_TYPES_FULL.map(t=><div key={t.id} style={{ display:"flex", alignItems:"center", gap:4 }}><div style={{ width:8, height:8, borderRadius:2, background:t.color }}/><span style={{ fontSize:11, color:"#666" }}>{t.label}</span></div>)}
               </div>
             </div>
           </div>
         )}
 
-        {/* ── SCHEDULE LIST ── */}
+        {/* ── SCHEDULE ── */}
         {tab==="schedule" && (
           <div>
             <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
               <FilterBtn label="전체" active={filterMember==="all"} color="#1A1A2E" onClick={()=>setFilterMember("all")}/>
               {TEAM_MEMBERS.map(m=><FilterBtn key={m.id} label={m.name} active={filterMember===String(m.id)} color={m.color} onClick={()=>setFilterMember(String(m.id))}/>)}
             </div>
-
             <div style={{ fontWeight:700, fontSize:13, color:"#1A1A2E", marginBottom:10 }}>🏖️ 휴가</div>
             {filteredLeaves.length===0
               ? <div style={{ textAlign:"center", padding:"20px 0", color:"#bbb", fontSize:13, marginBottom:16 }}>등록된 휴가가 없어요.</div>
               : filteredLeaves.map(l=>{
-                  const m2=getMember(l.memberId), t2=getTypeInfoFull(l.type);
+                  const m2=getMember(l.member_id), t2=getTypeInfoFull(l.type);
                   return (
                     <div key={l.id} style={{ background:"#fff", borderRadius:12, padding:"12px 14px", boxShadow:"0 1px 5px rgba(0,0,0,0.05)", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:7 }}>
                       <Avatar m={m2} size={32} fs={11}/>
                       <div style={{ flex:1, minWidth:80 }}>
                         <div style={{ fontWeight:700, fontSize:13, color:"#1A1A2E" }}>{m2?.name}</div>
-                        <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{l.startDate}{l.startDate!==l.endDate?` ~ ${l.endDate}`:""} ({l.days}일) · {l.reason}</div>
+                        <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{l.start_date}{l.start_date!==l.end_date?` ~ ${l.end_date}`:""} ({l.days}일) · {l.reason}</div>
                       </div>
                       <Tag bg={t2.bg} color={t2.color}>{t2.label}</Tag>
                       <DeleteBtn onClick={()=>deleteLeave(l.id)}/>
@@ -365,18 +323,17 @@ export default function VacationManager() {
                   );
                 })
             }
-
             <div style={{ fontWeight:700, fontSize:13, color:"#1A1A2E", margin:"18px 0 10px" }}>🗓️ 외부 일정</div>
             {filteredExternals.length===0
               ? <div style={{ textAlign:"center", padding:"20px 0", color:"#bbb", fontSize:13 }}>등록된 외부 일정이 없어요.</div>
               : filteredExternals.map(e=>{
-                  const m2=getMember(e.memberId), t2=getTypeInfoFull(e.type);
+                  const m2=getMember(e.member_id), t2=getTypeInfoFull(e.type);
                   return (
                     <div key={e.id} style={{ background:"#fff", borderRadius:12, padding:"12px 14px", boxShadow:"0 1px 5px rgba(0,0,0,0.05)", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:7 }}>
                       <Avatar m={m2} size={32} fs={11}/>
                       <div style={{ flex:1, minWidth:80 }}>
                         <div style={{ fontWeight:700, fontSize:13, color:"#1A1A2E" }}>{e.title}</div>
-                        <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{m2?.name} · {e.startDate}{e.startDate!==e.endDate?` ~ ${e.endDate}`:""}{e.location?` · 📍${e.location}`:""}</div>
+                        <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{m2?.name} · {e.start_date}{e.start_date!==e.end_date?` ~ ${e.end_date}`:""}{e.location?` · 📍${e.location}`:""}</div>
                       </div>
                       <Tag bg={t2.bg} color={t2.color}>{t2.label}</Tag>
                       <DeleteBtn onClick={()=>deleteExternal(e.id)}/>
@@ -430,8 +387,8 @@ export default function VacationManager() {
             <div style={{ fontWeight:700, fontSize:13, color:"#1A1A2E", marginBottom:10 }}>팀원별 현황</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))", gap:10, marginBottom:20 }}>
               {TEAM_MEMBERS.map(m=>{
-                const earned=overtimes.filter(o=>o.memberId===m.id).length;
-                const used2=overtimes.filter(o=>o.memberId===m.id&&o.used).length;
+                const earned=overtimes.filter(o=>o.member_id===m.id).length;
+                const used2=overtimes.filter(o=>o.member_id===m.id&&o.used).length;
                 const left=earned-used2;
                 return (
                   <div key={m.id} style={{ background:"#fff", borderRadius:14, padding:"14px 16px", boxShadow:"0 2px 8px rgba(0,0,0,0.05)", display:"flex", alignItems:"center", gap:10 }}>
@@ -452,7 +409,7 @@ export default function VacationManager() {
             {overtimes.length===0
               ? <div style={{ textAlign:"center", padding:"24px 0", color:"#bbb", fontSize:13 }}>등록된 휴일 근무가 없어요.</div>
               : overtimes.map(o=>{
-                  const m2=getMember(o.memberId);
+                  const m2=getMember(o.member_id);
                   return (
                     <div key={o.id} style={{ background:"#fff", borderRadius:12, padding:"12px 16px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)", marginBottom:7, display:"flex", alignItems:"center", gap:10 }}>
                       <Avatar m={m2} size={30} fs={11}/>
@@ -476,7 +433,7 @@ export default function VacationManager() {
               {[
                 {label:"전체 사용률", value:`${Math.round((stats.reduce((a,b)=>a+b.used,0)/(TEAM_MEMBERS.length*TOTAL_ANNUAL))*100)}%`, sub:`${stats.reduce((a,b)=>a+b.used,0)}/${TEAM_MEMBERS.length*TOTAL_ANNUAL}일`, color:"#E85D4A"},
                 {label:"외부 일정",   value:`${externals.length}건`,                                                                    sub:"전체 등록",  color:"#00897B"},
-                {label:"이달 휴가자", value:`${new Set(leaves.filter(l=>l.startDate.startsWith("2026-04")).map(l=>l.memberId)).size}명`, sub:"4월 기준",   color:"#4A90E2"},
+                {label:"이달 휴가자", value:`${new Set(leaves.filter(l=>l.start_date&&l.start_date.startsWith(`${calYear}-${String(calMonth+1).padStart(2,"0")}`)).map(l=>l.member_id)).size}명`, sub:"이번달 기준", color:"#4A90E2"},
                 {label:"평균 잔여",   value:`${(stats.reduce((a,b)=>a+b.remaining,0)/stats.length).toFixed(1)}일`,                     sub:"팀원 평균",  color:"#7ED321"},
               ].map(c=>(
                 <div key={c.label} style={{ background:"#fff", borderRadius:14, padding:"14px", boxShadow:"0 2px 8px rgba(0,0,0,0.05)" }}>
@@ -536,13 +493,13 @@ export default function VacationManager() {
             </div>
             <div style={{ display:"flex", gap:8 }}>
               <div style={{ flex:1 }}><label style={labelStyle}>시작일</label><input type="date" value={form.startDate} onChange={e=>setForm(f=>({...f,startDate:e.target.value}))} style={inputStyle}/></div>
-              <div style={{ flex:1 }}><label style={labelStyle}>종료일</label><input type="date" value={form.endDate}   onChange={e=>setForm(f=>({...f,endDate:e.target.value}))}   style={inputStyle}/></div>
+              <div style={{ flex:1 }}><label style={labelStyle}>종료일</label><input type="date" value={form.endDate} onChange={e=>setForm(f=>({...f,endDate:e.target.value}))} style={inputStyle}/></div>
             </div>
             <div><label style={labelStyle}>사유</label><textarea value={form.reason} onChange={e=>setForm(f=>({...f,reason:e.target.value}))} rows={3} placeholder="휴가 사유를 입력하세요" style={{...inputStyle,resize:"none"}}/></div>
           </div>
           <div style={{ display:"flex", gap:8, marginTop:16 }}>
             <button onClick={()=>setShowLeave(false)} style={{ flex:1, padding:"11px", borderRadius:10, border:"1.5px solid #E8E8E8", background:"#fff", fontWeight:600, fontSize:13, cursor:"pointer", color:"#555" }}>취소</button>
-            <button onClick={submitLeave}              style={{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"#E85D4A", color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer" }}>등록하기</button>
+            <button onClick={submitLeave} style={{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"#E85D4A", color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer" }}>등록하기</button>
           </div>
         </Modal>
       )}
@@ -572,13 +529,13 @@ export default function VacationManager() {
             <div><label style={labelStyle}>일정 제목</label><input value={extForm.title} onChange={e=>setExtForm(f=>({...f,title:e.target.value}))} placeholder="예: 클라이언트 킥오프 미팅" style={inputStyle}/></div>
             <div style={{ display:"flex", gap:8 }}>
               <div style={{ flex:1 }}><label style={labelStyle}>시작일</label><input type="date" value={extForm.startDate} onChange={e=>setExtForm(f=>({...f,startDate:e.target.value}))} style={inputStyle}/></div>
-              <div style={{ flex:1 }}><label style={labelStyle}>종료일</label><input type="date" value={extForm.endDate}   onChange={e=>setExtForm(f=>({...f,endDate:e.target.value}))}   style={inputStyle}/></div>
+              <div style={{ flex:1 }}><label style={labelStyle}>종료일</label><input type="date" value={extForm.endDate} onChange={e=>setExtForm(f=>({...f,endDate:e.target.value}))} style={inputStyle}/></div>
             </div>
             <div><label style={labelStyle}>장소 (선택)</label><input value={extForm.location} onChange={e=>setExtForm(f=>({...f,location:e.target.value}))} placeholder="예: 강남 본사, 온라인" style={inputStyle}/></div>
           </div>
           <div style={{ display:"flex", gap:8, marginTop:16 }}>
             <button onClick={()=>setShowExt(false)} style={{ flex:1, padding:"11px", borderRadius:10, border:"1.5px solid #E8E8E8", background:"#fff", fontWeight:600, fontSize:13, cursor:"pointer", color:"#555" }}>취소</button>
-            <button onClick={submitExt}             style={{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"#00695C", color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer" }}>등록하기</button>
+            <button onClick={submitExt} style={{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"#00695C", color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer" }}>등록하기</button>
           </div>
         </Modal>
       )}
@@ -593,12 +550,12 @@ export default function VacationManager() {
                 {TEAM_MEMBERS.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </div>
-            <div><label style={labelStyle}>근무일</label><input type="date" value={otForm.date}   onChange={e=>setOtForm(f=>({...f,date:e.target.value}))}   style={inputStyle}/></div>
-            <div><label style={labelStyle}>사유</label>  <input              value={otForm.reason} onChange={e=>setOtForm(f=>({...f,reason:e.target.value}))} placeholder="예: 분기 마감 대응" style={inputStyle}/></div>
+            <div><label style={labelStyle}>근무일</label><input type="date" value={otForm.date} onChange={e=>setOtForm(f=>({...f,date:e.target.value}))} style={inputStyle}/></div>
+            <div><label style={labelStyle}>사유</label><input value={otForm.reason} onChange={e=>setOtForm(f=>({...f,reason:e.target.value}))} placeholder="예: 분기 마감 대응" style={inputStyle}/></div>
           </div>
           <div style={{ display:"flex", gap:8, marginTop:16 }}>
             <button onClick={()=>setShowOT(false)} style={{ flex:1, padding:"11px", borderRadius:10, border:"1.5px solid #E8E8E8", background:"#fff", fontWeight:600, fontSize:13, cursor:"pointer", color:"#555" }}>취소</button>
-            <button onClick={submitOT}              style={{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"#9B59B6", color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer" }}>등록하기</button>
+            <button onClick={submitOT} style={{ flex:2, padding:"11px", borderRadius:10, border:"none", background:"#9B59B6", color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer" }}>등록하기</button>
           </div>
         </Modal>
       )}
